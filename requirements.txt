@@ -1,7 +1,7 @@
 streamlit
-yfinance
 pandas
+yfinance
 twstock
 plotly
-deep-translator
 numpy
+deep-translator
