@@ -1,0 +1,7 @@
+streamlit
+yfinance
+pandas
+twstock
+plotly
+deep-translator
+numpy
