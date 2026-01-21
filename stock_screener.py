@@ -7,9 +7,10 @@ from plotly.subplots import make_subplots
 import numpy as np
 from deep_translator import GoogleTranslator
 from datetime import datetime
+import pickle
 
 # --- 設定網頁佈局 ---
-st.set_page_config(page_title="台股戰略操盤室 Pro", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="台股戰略操盤室 Pro", page_icon="🧪", layout="wide")
 
 # --- 初始化 Session State ---
 if 'scan_results' not in st.session_state:
@@ -59,12 +60,13 @@ def translate_summary(text):
 
 def add_to_history(mode_key, df, note=""):
     if df is not None and not df.empty:
-        time_str = datetime.now().strftime("%H:%M:%S")
+        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         display_name = f"[{time_str}] {note}"
         st.session_state.scan_history.insert(0, {
             "display_name": display_name,
             "data": df,
-            "mode": mode_key
+            "mode": mode_key,
+            "timestamp": datetime.now().timestamp()
         })
 
 # --- 3. 技術指標計算 ---
@@ -162,57 +164,114 @@ def analyze_price_action_logic(df):
         'reasons': reasons, 'viewpoint': viewpoint
     }
 
-def plot_full_analysis(df, name, analysis):
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
-                        row_heights=[0.6, 0.2, 0.2],
-                        subplot_titles=(f"{name} 價量分析", "KD", "MACD"))
-    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
-                    low=df['Low'], close=df['Close'], name='K線'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(20).mean(), line=dict(color='orange', width=1), name='月線'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(60).mean(), line=dict(color='green', width=1), name='季線'), row=1, col=1)
+# --- 新增：回測引擎 ---
+def backtest_strategy(df, initial_capital=100000):
+    """
+    簡單回測邏輯：KD 黃金交叉(K>D)且K<40買入，死亡交叉(K<D)賣出
+    """
+    cash = initial_capital
+    position = 0 # 持股數
+    equity_curve = []
     
-    fig.add_trace(go.Scatter(x=df.index, y=df['K'], line=dict(color='blue', width=1), name='K'), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['D'], line=dict(color='orange', width=1), name='D'), row=2, col=1)
-    fig.add_hline(y=80, line_dash="dot", line_color="gray", row=2, col=1)
-    fig.add_hline(y=20, line_dash="dot", line_color="gray", row=2, col=1)
+    # 紀錄交易點
+    buy_signals = []
+    sell_signals = []
     
-    colors = ['red' if v < 0 else 'green' for v in df['MACD_Hist']]
-    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=colors, name='MACD'), row=3, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['DIF'], line=dict(color='black', width=1), name='DIF'), row=3, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['DEA'], line=dict(color='orange', width=1), name='DEA'), row=3, col=1)
-    fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False)
+    # 從資料開始處遍歷 (忽略前 20 天以確保有 MA/KD)
+    for i in range(20, len(df)):
+        price = df['Close'].iloc[i]
+        date = df.index[i]
+        
+        # 指標
+        k = df['K'].iloc[i]
+        d = df['D'].iloc[i]
+        prev_k = df['K'].iloc[i-1]
+        prev_d = df['D'].iloc[i-1]
+        
+        # 買入條件：黃金交叉 且 K 在相對低檔 (40以下)
+        if position == 0:
+            if k > d and prev_k < prev_d and k < 40:
+                position = int(cash / price)
+                cash -= position * price
+                buy_signals.append((date, price))
+        
+        # 賣出條件：死亡交叉 
+        elif position > 0:
+            if k < d and prev_k > prev_d:
+                cash += position * price
+                position = 0
+                sell_signals.append((date, price))
+        
+        # 計算當日總資產
+        current_equity = cash + (position * price)
+        equity_curve.append(current_equity)
+
+    # 計算 Buy & Hold 績效
+    start_price = df['Close'].iloc[20]
+    end_price = df['Close'].iloc[-1]
+    bh_return = (end_price - start_price) / start_price * 100
+    
+    # 計算 策略 績效
+    final_equity = equity_curve[-1]
+    strategy_return = (final_equity - initial_capital) / initial_capital * 100
+    
+    return {
+        'equity_curve': equity_curve,
+        'dates': df.index[20:],
+        'buy_signals': buy_signals,
+        'sell_signals': sell_signals,
+        'strategy_return': strategy_return,
+        'bh_return': bh_return,
+        'final_equity': final_equity
+    }
+
+def plot_backtest(df, bt_result):
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    # 股價
+    fig.add_trace(go.Scatter(x=bt_result['dates'], y=df['Close'].iloc[20:], name="股價", line=dict(color='gray', width=1, dash='dot')), secondary_y=True)
+    
+    # 策略資產曲線
+    fig.add_trace(go.Scatter(x=bt_result['dates'], y=bt_result['equity_curve'], name="KD策略總資產", line=dict(color='blue', width=2)), secondary_y=False)
+    
+    # 買賣點
+    for date, price in bt_result['buy_signals']:
+        fig.add_annotation(x=date, y=price, text="B", showarrow=True, arrowhead=1, ax=0, ay=10, bgcolor="red", font=dict(color="white"), yref="y2")
+    for date, price in bt_result['sell_signals']:
+        fig.add_annotation(x=date, y=price, text="S", showarrow=True, arrowhead=1, ax=0, ay=-10, bgcolor="green", font=dict(color="white"), yref="y2")
+
+    fig.update_layout(title="過去一年策略回測 vs 股價走勢", xaxis_title="日期", height=500)
+    fig.update_yaxes(title_text="總資產 (TWD)", secondary_y=False)
+    fig.update_yaxes(title_text="股價", secondary_y=True)
     return fig
 
 @st.cache_data(ttl=3600)
 def get_stock_detail(code):
     try:
-        # 防呆機制：不管輸入 2330, 2330.TW, 2330.TWO 都處理
         clean_code = code.upper().replace('.TW', '').replace('.TWO', '').strip()
         yf_ticker = f"{clean_code}.TW"
-        
         stock = yf.Ticker(yf_ticker)
         hist = stock.history(period="1y")
-        
-        # 如果 .TW 沒資料，嘗試 .TWO (上櫃)
         if hist.empty:
              yf_ticker = f"{clean_code}.TWO"
              stock = yf.Ticker(yf_ticker)
              hist = stock.history(period="1y")
-
-        if hist.empty: return None # 真的抓不到
+        if hist.empty: return None 
 
         name = clean_code
         if clean_code in twstock.codes: name = twstock.codes[clean_code].name
         
         hist = calculate_indicators(hist)
         pa = analyze_price_action_logic(hist)
+        # 進行回測
+        bt = backtest_strategy(hist)
+        
         info = stock.info
         raw_summary = info.get('longBusinessSummary', '')
         zh_summary = translate_summary(raw_summary)
-        return {'info': info, 'history': hist, 'news': stock.news, 'name': name, 'analysis': pa, 'zh_summary': zh_summary}
+        return {'info': info, 'history': hist, 'news': stock.news, 'name': name, 'analysis': pa, 'zh_summary': zh_summary, 'backtest': bt}
     except: return None
 
-# --- 核心優化：批次下載與掃描 ---
 def scan_tickers_optimized(ticker_list, max_pe, min_bias, investment, min_price, max_price, mode="ranking"):
     results = []
     batch_tickers = [f"{code}.TW" for code in ticker_list]
@@ -271,9 +330,46 @@ with st.sidebar:
     with col_go:
         if st.button("GO", type="primary"):
             if direct_input:
-                # 簡單清理輸入，防止使用者輸入怪字元
                 st.session_state.selected_stock = direct_input.replace(".TW", "").replace(".TWO", "").strip().upper()
                 st.rerun()
+    st.markdown("---")
+    
+    with st.expander("♾️ 歷史總檔管理", expanded=True):
+        st.info("💡 流程：開盤讀舊檔 ➡️ 盤中掃描 ➡️ 收盤存新檔")
+        
+        uploaded_file = st.file_uploader("📂 Step 1: 讀取「歷史總檔.pkl」", type=["pkl"])
+        if uploaded_file is not None:
+            try:
+                restored_history = pickle.load(uploaded_file)
+                if isinstance(restored_history, list):
+                    existing_names = set(item['display_name'] for item in st.session_state.scan_history)
+                    new_count = 0
+                    for item in restored_history:
+                        if item['display_name'] not in existing_names:
+                            if 'timestamp' not in item: item['timestamp'] = datetime.now().timestamp()
+                            st.session_state.scan_history.append(item)
+                            existing_names.add(item['display_name'])
+                            new_count += 1
+                    
+                    st.session_state.scan_history.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+                    if new_count > 0:
+                        st.success(f"已載入 {new_count} 筆歷史紀錄！")
+                else: st.error("檔案格式不符")
+            except: pass
+
+        if st.session_state.scan_history:
+            history_data = pickle.dumps(st.session_state.scan_history)
+            file_name = "歷史總檔_Master.pkl"
+            st.download_button(
+                "💾 Step 2: 下載更新後的總檔", 
+                data=history_data, 
+                file_name=file_name, 
+                mime="application/octet-stream", 
+                type="primary"
+            )
+        else:
+            st.warning("尚無紀錄可下載")
+
     st.markdown("---")
     
     page_mode = st.radio("📱 選擇功能模式", ["🏆 市場熱門排行", "🪙 價格區間快搜"])
@@ -325,10 +421,8 @@ with st.sidebar:
 
 # === 主畫面路由 ===
 if st.session_state.selected_stock:
-    # --- 詳細分析頁 ---
     code = st.session_state.selected_stock
     
-    # 放置返回按鈕，確保無論有沒有資料都能按
     if st.button("⬅️ 返回列表"):
         st.session_state.selected_stock = None
         st.rerun()
@@ -337,12 +431,13 @@ if st.session_state.selected_stock:
         data = get_stock_detail(code)
     
     if data:
-        # 有資料才顯示
         pa = data['analysis']
         info = data['info']
+        bt = data['backtest']
+        
         st.markdown(f"# {data['name']} ({code}) 戰略分析報告")
         
-        tab1, tab2, tab3 = st.tabs(["📊 戰略總覽", "📈 技術指標詳解", "💰 獲利與產業"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 戰略總覽", "📈 技術指標詳解", "💰 獲利與產業", "🧪 策略回測 (驗證)"])
 
         with tab1:
             c1, c2, c3, c4 = st.columns(4)
@@ -351,7 +446,7 @@ if st.session_state.selected_stock:
             c3.metric("AI 觀點", pa['viewpoint'])
             k_val, d_val = f"{pa['k']:.1f}", f"{pa['d']:.1f}"
             c4.metric("KD 值", k_val, f"D: {d_val}", delta_color="off")
-
+            
             st.markdown("### 🧐 深度觀點")
             col_reason, col_setup = st.columns([1, 1])
             with col_reason:
@@ -393,8 +488,24 @@ if st.session_state.selected_stock:
             sector_zh = translate_sector(info.get('sector', 'Unknown'))
             st.info(f"**產業**: {sector_zh} | **細分**: {info.get('industry', 'Unknown')}")
             st.write(f"**公司簡介**: {data['zh_summary']}")
+            
+        with tab4:
+            st.subheader("🧪 過去一年策略回測 (驗證)")
+            st.caption("模擬策略：KD 低檔黃金交叉買進，死亡交叉賣出。初始資金：10萬")
+            
+            m1, m2, m3 = st.columns(3)
+            m1.metric("KD 策略報酬率", f"{bt['strategy_return']:.1f}%", delta_color="normal")
+            m2.metric("買進持有 (Buy&Hold) 報酬率", f"{bt['bh_return']:.1f}%", delta_color="normal")
+            m3.metric("期末總資產", f"${int(bt['final_equity']):,}")
+            
+            if bt['strategy_return'] > bt['bh_return']:
+                st.success("🎉 **恭喜！此策略在過去一年勝過單純存股！**")
+            else:
+                st.warning("⚠️ 注意：此策略績效不如單純持有，建議搭配其他指標判斷。")
+                
+            st.plotly_chart(plot_backtest(data['history'], bt), use_container_width=True)
+
     else:
-        # --- 這裡就是修復重點：如果找不到資料，顯示錯誤訊息 ---
         st.error(f"❌ 找不到代號為 **{code}** 的股票資料。")
         st.markdown("""
         **可能原因：**
