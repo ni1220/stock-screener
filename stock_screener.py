@@ -9,7 +9,7 @@ from deep_translator import GoogleTranslator
 from datetime import datetime
 
 # --- 設定網頁佈局 ---
-st.set_page_config(page_title="台股戰略操盤室 Pro", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="台股戰略操盤室 Pro", page_icon="🔍", layout="wide")
 
 # --- 初始化 Session State ---
 if 'scan_results' not in st.session_state:
@@ -186,13 +186,24 @@ def plot_full_analysis(df, name, analysis):
 @st.cache_data(ttl=3600)
 def get_stock_detail(code):
     try:
+        # 防呆機制：不管輸入 2330, 2330.TW, 2330.TWO 都處理
         clean_code = code.upper().replace('.TW', '').replace('.TWO', '').strip()
         yf_ticker = f"{clean_code}.TW"
+        
         stock = yf.Ticker(yf_ticker)
-        hist = stock.history(period="1y") 
-        if hist.empty: return None
+        hist = stock.history(period="1y")
+        
+        # 如果 .TW 沒資料，嘗試 .TWO (上櫃)
+        if hist.empty:
+             yf_ticker = f"{clean_code}.TWO"
+             stock = yf.Ticker(yf_ticker)
+             hist = stock.history(period="1y")
+
+        if hist.empty: return None # 真的抓不到
+
         name = clean_code
         if clean_code in twstock.codes: name = twstock.codes[clean_code].name
+        
         hist = calculate_indicators(hist)
         pa = analyze_price_action_logic(hist)
         info = stock.info
@@ -203,65 +214,42 @@ def get_stock_detail(code):
 
 # --- 核心優化：批次下載與掃描 ---
 def scan_tickers_optimized(ticker_list, max_pe, min_bias, investment, min_price, max_price, mode="ranking"):
-    """
-    v22.0 優化：使用 yf.download 進行批次下載，解決 Loop 造成的 API Rate Limit 問題。
-    """
     results = []
-    
-    # 1. 準備批次代號清單
     batch_tickers = [f"{code}.TW" for code in ticker_list]
-    
     try:
-        # 2. 一次性下載所有資料 (極速)
-        # group_by='ticker' 讓資料結構變成 data['2330.TW']['Close']
         data = yf.download(batch_tickers, period="3mo", group_by='ticker', threads=True, progress=False)
-        
-        # 3. 遍歷處理 (本地計算，不消耗 API)
+        if data.empty: return pd.DataFrame()
+
         for code in ticker_list:
             yf_code = f"{code}.TW"
             try:
-                # 處理單一股票資料 (從大表格中切出來)
-                if yf_code not in data.columns.levels[0]: 
-                    continue # 資料下載失敗或代號錯誤
-                
+                if yf_code not in data.columns.levels[0]: continue 
                 df = data[yf_code].dropna()
                 if df.empty or len(df) < 20: continue
 
                 cp = df['Close'].iloc[-1]
-                
-                # --- 價格過濾 ---
                 if not (min_price <= cp <= max_price): continue 
 
-                # 計算指標
                 ma20 = df['Close'].rolling(20).mean().iloc[-1]
                 bias = ((cp - ma20) / ma20) * 100
-                
-                # --- PE 查詢策略 (兩階段過濾) ---
-                # 只有通過價格和乖離率篩選的，才去查 PE，大幅減少 API 呼叫
-                # 如果是價格模式，甚至不需要查 PE
                 pe = 999
                 should_add = False
                 
                 if mode == "price":
                     should_add = True
                 else:
-                    # 排行榜模式：先初步判斷乖離率是否及格
-                    if bias >= min_bias or (len(ticker_list) <= 10): # 潛力股或符合乖離
-                         # 這裡才去 Call 個股 info，避免 100 支全查被鎖
+                    if bias >= min_bias or (len(ticker_list) <= 10):
                         try:
                             t = yf.Ticker(yf_code)
-                            pe = t.info.get('trailingPE', 999)
-                            pe = pe if pe else 999
+                            pe_val = t.info.get('trailingPE', 999)
+                            pe = pe_val if pe_val else 999
                         except: pe = 999
-                        
-                        if (pe <= max_pe or pe == 999):
-                            should_add = True
+                        if (pe <= max_pe or pe == 999): should_add = True
 
                 if should_add:
                     entry = ma20
                     target = cp * 1.05
                     profit = int(investment * ((target - entry)/entry)) if entry > 0 else 0
-                    
                     name = twstock.codes[code].name if code in twstock.codes else code
                     results.append({
                         '代號': code, '名稱': name, '現價': round(cp, 2),
@@ -269,11 +257,7 @@ def scan_tickers_optimized(ticker_list, max_pe, min_bias, investment, min_price,
                         '乖離率(%)': round(bias, 2), '預估獲利': f"${profit:,}"
                     })
             except: continue
-
-    except Exception as e:
-        st.error(f"掃描發生錯誤: {e}")
-        return pd.DataFrame()
-
+    except: return pd.DataFrame()
     return pd.DataFrame(results)
 
 # --- 5. 側邊欄控制台 ---
@@ -287,7 +271,8 @@ with st.sidebar:
     with col_go:
         if st.button("GO", type="primary"):
             if direct_input:
-                st.session_state.selected_stock = direct_input.replace(".TW", "").strip()
+                # 簡單清理輸入，防止使用者輸入怪字元
+                st.session_state.selected_stock = direct_input.replace(".TW", "").replace(".TWO", "").strip().upper()
                 st.rerun()
     st.markdown("---")
     
@@ -296,64 +281,54 @@ with st.sidebar:
     if page_mode == "🏆 市場熱門排行":
         st.session_state.current_mode = "ranking"
         st.info("💡 篩選優質權值股與潛力黑馬")
-        max_pe = st.number_input("本益比上限 (PE)", value=35)
-        min_bias = st.number_input("乖離率下限 (%)", value=0.0)
+        with st.expander("⚙️ 進階參數設定 (PE / 乖離)", expanded=True):
+            max_pe = st.number_input("本益比上限 (PE)", value=35)
+            min_bias = st.number_input("乖離率下限 (%)", value=0.0)
         investment_amount = st.number_input("預估投入金額", value=100000, step=10000)
         
-        if st.button("🚀 啟動排行掃描"):
+        if st.button("🚀 啟動排行掃描", type="primary"):
             st.session_state.selected_stock = None
             st.session_state.scan_results = None 
-            
-            # 顯示進度條，提升 UX
-            progress_text = "正在批次下載市場數據 (極速版)..."
-            my_bar = st.progress(0, text=progress_text)
-            
-            # 執行優化後的掃描
-            df_main = scan_tickers_optimized(MARKET_STOCKS, max_pe, min_bias, investment_amount, 0, 9999, mode="ranking")
-            my_bar.progress(50, text="正在分析潛力股...")
-            
-            if not df_main.empty:
-                df_top20 = df_main.sort_values(by='乖離率(%)', ascending=False).head(20).reset_index(drop=True)
-                df_top20.insert(0, '排名', range(1, 1 + len(df_top20)))
-                st.session_state.scan_results = df_top20
-                add_to_history("ranking", df_top20, f"Top 20 (PE<{max_pe})")
-            else: st.session_state.scan_results = pd.DataFrame()
+            with st.spinner("正在全速下載市場數據..."):
+                df_main = scan_tickers_optimized(MARKET_STOCKS, max_pe, min_bias, investment_amount, 0, 9999, mode="ranking")
+                if not df_main.empty:
+                    df_top20 = df_main.sort_values(by='乖離率(%)', ascending=False).head(20).reset_index(drop=True)
+                    df_top20.insert(0, '排名', range(1, 1 + len(df_top20)))
+                    st.session_state.scan_results = df_top20
+                    add_to_history("ranking", df_top20, f"Top 20 (PE<{max_pe})")
+                else: st.session_state.scan_results = pd.DataFrame()
 
-            st.session_state.scan_results_potential = scan_tickers_optimized(POTENTIAL_STOCKS, 9999, -9999, investment_amount, 0, 9999, mode="ranking")
-            
-            my_bar.progress(100, text="掃描完成！")
-            my_bar.empty() # 清除進度條
+                st.session_state.scan_results_potential = scan_tickers_optimized(POTENTIAL_STOCKS, 9999, -9999, investment_amount, 0, 9999, mode="ranking")
+            st.success("掃描完成！")
 
     else:
         st.session_state.current_mode = "price"
         st.info("💡 尋找特定價位的機會 (如銅板股)")
-        c1, c2 = st.columns(2)
-        min_p = c1.number_input("最低價", value=0)
-        max_p = c2.number_input("最高價", value=50) 
+        with st.expander("💰 價格區間設定", expanded=True):
+            c1, c2 = st.columns(2)
+            min_p = c1.number_input("最低價", value=0)
+            max_p = c2.number_input("最高價", value=50)
         investment_amount = st.number_input("預估投入金額 (本金)", value=50000, step=5000)
         
-        if st.button("🔎 搜尋價格區間"):
+        if st.button("🔎 搜尋價格區間", type="primary"):
             st.session_state.selected_stock = None
             st.session_state.scan_results = None
-            
-            progress_text = f"正在搜尋 {min_p}~{max_p} 元的股票..."
-            my_bar = st.progress(0, text=progress_text)
-            
-            df_price = scan_tickers_optimized(MARKET_STOCKS, 9999, -9999, investment_amount, min_p, max_p, mode="price")
-            my_bar.progress(100, text="搜尋完成！")
-            my_bar.empty()
-            
-            if not df_price.empty:
-                df_price = df_price.sort_values(by='現價', ascending=True).reset_index(drop=True)
-                st.session_state.scan_results = df_price
-                add_to_history("price", df_price, f"股價 ${min_p}-${max_p}")
-            else:
-                st.session_state.scan_results = pd.DataFrame()
+            with st.spinner(f"正在搜尋 {min_p}~{max_p} 元的股票..."):
+                df_price = scan_tickers_optimized(MARKET_STOCKS, 9999, -9999, investment_amount, min_p, max_p, mode="price")
+                if not df_price.empty:
+                    df_price = df_price.sort_values(by='現價', ascending=True).reset_index(drop=True)
+                    st.session_state.scan_results = df_price
+                    add_to_history("price", df_price, f"股價 ${min_p}-${max_p}")
+                else:
+                    st.session_state.scan_results = pd.DataFrame()
+            st.success("搜尋完成！")
 
 # === 主畫面路由 ===
 if st.session_state.selected_stock:
-    # --- 詳細分析頁 (共用) ---
+    # --- 詳細分析頁 ---
     code = st.session_state.selected_stock
+    
+    # 放置返回按鈕，確保無論有沒有資料都能按
     if st.button("⬅️ 返回列表"):
         st.session_state.selected_stock = None
         st.rerun()
@@ -362,6 +337,7 @@ if st.session_state.selected_stock:
         data = get_stock_detail(code)
     
     if data:
+        # 有資料才顯示
         pa = data['analysis']
         info = data['info']
         st.markdown(f"# {data['name']} ({code}) 戰略分析報告")
@@ -417,8 +393,20 @@ if st.session_state.selected_stock:
             sector_zh = translate_sector(info.get('sector', 'Unknown'))
             st.info(f"**產業**: {sector_zh} | **細分**: {info.get('industry', 'Unknown')}")
             st.write(f"**公司簡介**: {data['zh_summary']}")
+    else:
+        # --- 這裡就是修復重點：如果找不到資料，顯示錯誤訊息 ---
+        st.error(f"❌ 找不到代號為 **{code}** 的股票資料。")
+        st.markdown("""
+        **可能原因：**
+        1. **代號輸入錯誤**：請確認是否為正確的台股代號（如 2330）。
+        2. **資料源異常**：Yahoo Finance 暫時無法連線。
+        3. **股票已下市**：該股票已停止交易。
+        
+        請按下方的「返回列表」重新輸入。
+        """)
 
 else:
+    # --- 列表頁 ---
     if st.session_state.current_mode == "ranking":
         st.title("🏆 台股熱門排行模式")
         tab_now, tab_hist = st.tabs(["🚀 最新掃描結果", "📜 排行榜歷史回顧"])
