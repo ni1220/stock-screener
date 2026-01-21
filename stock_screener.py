@@ -10,7 +10,7 @@ from datetime import datetime
 import pickle
 
 # --- 設定網頁佈局 ---
-st.set_page_config(page_title="台股戰略操盤室 Pro", page_icon="🧪", layout="wide")
+st.set_page_config(page_title="台股戰略操盤室 Pro", page_icon="🧠", layout="wide")
 
 # --- 初始化 Session State ---
 if 'scan_results' not in st.session_state:
@@ -68,6 +68,32 @@ def add_to_history(mode_key, df, note=""):
             "mode": mode_key,
             "timestamp": datetime.now().timestamp()
         })
+
+# --- 新增：智能搜尋引擎 (中文轉代號) ---
+def smart_search_stock_code(input_str):
+    """
+    輸入: "台積電" or "2330" or "2330.TW"
+    輸出: "2330" (若找不到則回傳 None)
+    """
+    clean_input = input_str.replace('.TW', '').replace('.TWO', '').strip()
+    
+    # 1. 如果是數字，直接回傳
+    if clean_input.isdigit():
+        return clean_input
+    
+    # 2. 如果是中文，遍歷 twstock 代號表
+    # 優先找「完全符合」的名稱
+    for code, data in twstock.codes.items():
+        if clean_input == data.name:
+            return code
+            
+    # 3. 如果完全符合找不到，找「部分符合」(例如輸入 "台積" 找 "台積電")
+    # 注意：這可能會找到多個，我們回傳第一個找到的
+    for code, data in twstock.codes.items():
+        if clean_input in data.name:
+            return code
+            
+    return None
 
 # --- 3. 技術指標計算 ---
 def calculate_indicators(df):
@@ -164,88 +190,60 @@ def analyze_price_action_logic(df):
         'reasons': reasons, 'viewpoint': viewpoint
     }
 
-# --- 新增：回測引擎 ---
 def backtest_strategy(df, initial_capital=100000):
-    """
-    簡單回測邏輯：KD 黃金交叉(K>D)且K<40買入，死亡交叉(K<D)賣出
-    """
     cash = initial_capital
-    position = 0 # 持股數
+    position = 0 
     equity_curve = []
-    
-    # 紀錄交易點
     buy_signals = []
     sell_signals = []
     
-    # 從資料開始處遍歷 (忽略前 20 天以確保有 MA/KD)
     for i in range(20, len(df)):
         price = df['Close'].iloc[i]
         date = df.index[i]
-        
-        # 指標
         k = df['K'].iloc[i]
         d = df['D'].iloc[i]
         prev_k = df['K'].iloc[i-1]
         prev_d = df['D'].iloc[i-1]
         
-        # 買入條件：黃金交叉 且 K 在相對低檔 (40以下)
         if position == 0:
             if k > d and prev_k < prev_d and k < 40:
                 position = int(cash / price)
                 cash -= position * price
                 buy_signals.append((date, price))
-        
-        # 賣出條件：死亡交叉 
         elif position > 0:
             if k < d and prev_k > prev_d:
                 cash += position * price
                 position = 0
                 sell_signals.append((date, price))
         
-        # 計算當日總資產
         current_equity = cash + (position * price)
         equity_curve.append(current_equity)
 
-    # 計算 Buy & Hold 績效
     start_price = df['Close'].iloc[20]
     end_price = df['Close'].iloc[-1]
     bh_return = (end_price - start_price) / start_price * 100
-    
-    # 計算 策略 績效
     final_equity = equity_curve[-1]
     strategy_return = (final_equity - initial_capital) / initial_capital * 100
     
     return {
-        'equity_curve': equity_curve,
-        'dates': df.index[20:],
-        'buy_signals': buy_signals,
-        'sell_signals': sell_signals,
-        'strategy_return': strategy_return,
-        'bh_return': bh_return,
-        'final_equity': final_equity
+        'equity_curve': equity_curve, 'dates': df.index[20:],
+        'buy_signals': buy_signals, 'sell_signals': sell_signals,
+        'strategy_return': strategy_return, 'bh_return': bh_return, 'final_equity': final_equity
     }
 
 def plot_backtest(df, bt_result):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    
-    # 股價
     fig.add_trace(go.Scatter(x=bt_result['dates'], y=df['Close'].iloc[20:], name="股價", line=dict(color='gray', width=1, dash='dot')), secondary_y=True)
-    
-    # 策略資產曲線
     fig.add_trace(go.Scatter(x=bt_result['dates'], y=bt_result['equity_curve'], name="KD策略總資產", line=dict(color='blue', width=2)), secondary_y=False)
-    
-    # 買賣點
     for date, price in bt_result['buy_signals']:
         fig.add_annotation(x=date, y=price, text="B", showarrow=True, arrowhead=1, ax=0, ay=10, bgcolor="red", font=dict(color="white"), yref="y2")
     for date, price in bt_result['sell_signals']:
         fig.add_annotation(x=date, y=price, text="S", showarrow=True, arrowhead=1, ax=0, ay=-10, bgcolor="green", font=dict(color="white"), yref="y2")
-
     fig.update_layout(title="過去一年策略回測 vs 股價走勢", xaxis_title="日期", height=500)
     fig.update_yaxes(title_text="總資產 (TWD)", secondary_y=False)
     fig.update_yaxes(title_text="股價", secondary_y=True)
     return fig
 
-# --- 修復：補回 plot_full_analysis 函式 ---
 def plot_full_analysis(df, name, analysis):
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
                         row_heights=[0.6, 0.2, 0.2],
@@ -254,12 +252,10 @@ def plot_full_analysis(df, name, analysis):
                     low=df['Low'], close=df['Close'], name='K線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(20).mean(), line=dict(color='orange', width=1), name='月線'), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(60).mean(), line=dict(color='green', width=1), name='季線'), row=1, col=1)
-    
     fig.add_trace(go.Scatter(x=df.index, y=df['K'], line=dict(color='blue', width=1), name='K'), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['D'], line=dict(color='orange', width=1), name='D'), row=2, col=1)
     fig.add_hline(y=80, line_dash="dot", line_color="gray", row=2, col=1)
     fig.add_hline(y=20, line_dash="dot", line_color="gray", row=2, col=1)
-    
     colors = ['red' if v < 0 else 'green' for v in df['MACD_Hist']]
     fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=colors, name='MACD'), row=3, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['DIF'], line=dict(color='black', width=1), name='DIF'), row=3, col=1)
@@ -285,7 +281,6 @@ def get_stock_detail(code):
         
         hist = calculate_indicators(hist)
         pa = analyze_price_action_logic(hist)
-        # 進行回測
         bt = backtest_strategy(hist)
         
         info = stock.info
@@ -348,12 +343,19 @@ with st.sidebar:
     
     col_input, col_go = st.columns([2, 1])
     with col_input:
-        direct_input = st.text_input("代號快搜", placeholder="如 2330", label_visibility="collapsed")
+        direct_input = st.text_input("代號快搜", placeholder="輸入「台積電」或「2330」", label_visibility="collapsed")
     with col_go:
         if st.button("GO", type="primary"):
             if direct_input:
-                st.session_state.selected_stock = direct_input.replace(".TW", "").replace(".TWO", "").strip().upper()
-                st.rerun()
+                # --- v29.0 智能搜尋 ---
+                found_code = smart_search_stock_code(direct_input)
+                
+                if found_code:
+                    st.session_state.selected_stock = found_code
+                    st.rerun()
+                else:
+                    st.error(f"找不到「{direct_input}」")
+                    
     st.markdown("---")
     
     with st.expander("♾️ 歷史總檔管理", expanded=True):
