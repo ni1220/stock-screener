@@ -1,6 +1,6 @@
 streamlit
-pandas
 yfinance
+pandas
 twstock
 plotly
 numpy
