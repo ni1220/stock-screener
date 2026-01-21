@@ -9,11 +9,11 @@ from deep_translator import GoogleTranslator
 from datetime import datetime
 
 # --- 設定網頁佈局 ---
-st.set_page_config(page_title="台股戰略操盤室 Pro", page_icon="📈", layout="wide")
+st.set_page_config(page_title="台股戰略操盤室 Pro", page_icon="⚡", layout="wide")
 
 # --- 初始化 Session State ---
 if 'scan_results' not in st.session_state:
-    st.session_state.scan_results = None
+    st.session_state.scan_results = None 
 if 'scan_results_potential' not in st.session_state:
     st.session_state.scan_results_potential = None
 if 'selected_stock' not in st.session_state:
@@ -21,7 +21,7 @@ if 'selected_stock' not in st.session_state:
 if 'current_mode' not in st.session_state:
     st.session_state.current_mode = "ranking"
 if 'scan_history' not in st.session_state:
-    st.session_state.scan_history = []
+    st.session_state.scan_history = [] 
 
 # --- 1. 定義清單 ---
 POTENTIAL_STOCKS = ["3035", "3017", "6274", "8069", "1519"]
@@ -39,7 +39,6 @@ MARKET_STOCKS = [
     "5269", "5274", "5347", "5483", "5536", "5871", "5876", "6176", "6213", "6269"
 ]
 
-
 # --- 2. 輔助功能 ---
 def translate_sector(sector_eng):
     mapping = {
@@ -50,31 +49,23 @@ def translate_sector(sector_eng):
     }
     return mapping.get(sector_eng, sector_eng)
 
-
 def translate_summary(text):
     if not text or len(text) < 5: return "暫無詳細描述。"
     try:
         text_to_translate = text[:2000]
         translator = GoogleTranslator(source='auto', target='zh-TW')
         return translator.translate(text_to_translate)
-    except:
-        return f"翻譯失敗，顯示原文：\n{text}"
-
+    except: return f"翻譯失敗，顯示原文：\n{text}"
 
 def add_to_history(mode_key, df, note=""):
-    """
-    mode_key: 'ranking' 或 'price'
-    """
     if df is not None and not df.empty:
         time_str = datetime.now().strftime("%H:%M:%S")
-        # 標題加上時間與備註
         display_name = f"[{time_str}] {note}"
         st.session_state.scan_history.insert(0, {
             "display_name": display_name,
             "data": df,
-            "mode": mode_key  # 這裡用來區分是哪個頁面的歷史
+            "mode": mode_key
         })
-
 
 # --- 3. 技術指標計算 ---
 def calculate_indicators(df):
@@ -85,8 +76,8 @@ def calculate_indicators(df):
     k_list, d_list = [], []
     k, d = 50, 50
     for rsv in df['RSV']:
-        k = (2 / 3) * k + (1 / 3) * rsv
-        d = (2 / 3) * d + (1 / 3) * k
+        k = (2/3) * k + (1/3) * rsv
+        d = (2/3) * d + (1/3) * k
         k_list.append(k)
         d_list.append(d)
     df['K'] = k_list
@@ -99,7 +90,6 @@ def calculate_indicators(df):
     df['MACD_Hist'] = df['DIF'] - df['DEA']
     return df
 
-
 # --- 4. 核心分析模組 ---
 def analyze_price_action_logic(df):
     close = df['Close'].iloc[-1]
@@ -108,7 +98,7 @@ def analyze_price_action_logic(df):
     recent_high = df['High'].tail(20).max()
     recent_low = df['Low'].tail(20).min()
     bias_20 = ((close - ma20) / ma20) * 100
-
+    
     k = df['K'].iloc[-1]
     d = df['D'].iloc[-1]
     macd_hist = df['MACD_Hist'].iloc[-1]
@@ -137,34 +127,26 @@ def analyze_price_action_logic(df):
     reasons = []
     if close > ma20: reasons.append("✅ 股價站穩月線 (20MA)。")
     if ma20 > ma60: reasons.append("✅ 均線多頭排列。")
-    if k > 80:
-        reasons.append("⚠️ KD 過熱 (>80)。")
-    elif k < 20:
-        reasons.append("✨ KD 低檔鈍化 (<20)。")
+    if k > 80: reasons.append("⚠️ KD 過熱 (>80)。")
+    elif k < 20: reasons.append("✨ KD 低檔鈍化 (<20)。")
     if k > d and df['K'].iloc[-2] < df['D'].iloc[-2]: reasons.append("🚀 KD 黃金交叉。")
     if macd_hist > 0 and prev_macd_hist < 0: reasons.append("🚀 MACD 翻紅轉強。")
-
+    
     viewpoint = ""
-    if bias_20 > 10:
-        viewpoint = "過熱 - 拉回再買"
-    elif bias_20 < -10:
-        viewpoint = "超跌 - 搶反彈"
-    elif trend == "強勢多頭":
-        viewpoint = "多頭 - 順勢操作"
-    else:
-        viewpoint = "觀望 - 等待訊號"
+    if bias_20 > 10: viewpoint = "過熱 - 拉回再買"
+    elif bias_20 < -10: viewpoint = "超跌 - 搶反彈"
+    elif trend == "強勢多頭": viewpoint = "多頭 - 順勢操作"
+    else: viewpoint = "觀望 - 等待訊號"
 
     if trend_color == "green" or trend_color == "blue":
         entry_price = ma20
-        stop_loss = ma60 if ma60 < entry_price else entry_price * 0.95
+        stop_loss = ma60 if ma60 < entry_price else entry_price * 0.95 
         take_profit = recent_high if recent_high > entry_price * 1.05 else entry_price * 1.1
     elif trend_color == "red":
-        entry_price = 0;
-        stop_loss = 0;
-        take_profit = 0
+        entry_price = 0; stop_loss = 0; take_profit = 0
     else:
         entry_price = recent_low * 1.02
-        stop_loss = recent_low * 0.97
+        stop_loss = recent_low * 0.97   
         take_profit = recent_high * 0.98
 
     rr_ratio = 0
@@ -180,25 +162,20 @@ def analyze_price_action_logic(df):
         'reasons': reasons, 'viewpoint': viewpoint
     }
 
-
 def plot_full_analysis(df, name, analysis):
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
                         row_heights=[0.6, 0.2, 0.2],
                         subplot_titles=(f"{name} 價量分析", "KD", "MACD"))
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
-                                 low=df['Low'], close=df['Close'], name='K線'), row=1, col=1)
-    fig.add_trace(
-        go.Scatter(x=df.index, y=df['Close'].rolling(20).mean(), line=dict(color='orange', width=1), name='月線'),
-        row=1, col=1)
-    fig.add_trace(
-        go.Scatter(x=df.index, y=df['Close'].rolling(60).mean(), line=dict(color='green', width=1), name='季線'), row=1,
-        col=1)
-
+                    low=df['Low'], close=df['Close'], name='K線'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(20).mean(), line=dict(color='orange', width=1), name='月線'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(60).mean(), line=dict(color='green', width=1), name='季線'), row=1, col=1)
+    
     fig.add_trace(go.Scatter(x=df.index, y=df['K'], line=dict(color='blue', width=1), name='K'), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['D'], line=dict(color='orange', width=1), name='D'), row=2, col=1)
     fig.add_hline(y=80, line_dash="dot", line_color="gray", row=2, col=1)
     fig.add_hline(y=20, line_dash="dot", line_color="gray", row=2, col=1)
-
+    
     colors = ['red' if v < 0 else 'green' for v in df['MACD_Hist']]
     fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=colors, name='MACD'), row=3, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['DIF'], line=dict(color='black', width=1), name='DIF'), row=3, col=1)
@@ -206,14 +183,13 @@ def plot_full_analysis(df, name, analysis):
     fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False)
     return fig
 
-
 @st.cache_data(ttl=3600)
 def get_stock_detail(code):
     try:
         clean_code = code.upper().replace('.TW', '').replace('.TWO', '').strip()
         yf_ticker = f"{clean_code}.TW"
         stock = yf.Ticker(yf_ticker)
-        hist = stock.history(period="1y")
+        hist = stock.history(period="1y") 
         if hist.empty: return None
         name = clean_code
         if clean_code in twstock.codes: name = twstock.codes[clean_code].name
@@ -222,56 +198,89 @@ def get_stock_detail(code):
         info = stock.info
         raw_summary = info.get('longBusinessSummary', '')
         zh_summary = translate_summary(raw_summary)
-        return {'info': info, 'history': hist, 'news': stock.news, 'name': name, 'analysis': pa,
-                'zh_summary': zh_summary}
-    except:
-        return None
+        return {'info': info, 'history': hist, 'news': stock.news, 'name': name, 'analysis': pa, 'zh_summary': zh_summary}
+    except: return None
 
-
-def scan_tickers(ticker_list, max_pe, min_bias, investment, min_price, max_price, mode="ranking"):
+# --- 核心優化：批次下載與掃描 ---
+def scan_tickers_optimized(ticker_list, max_pe, min_bias, investment, min_price, max_price, mode="ranking"):
+    """
+    v22.0 優化：使用 yf.download 進行批次下載，解決 Loop 造成的 API Rate Limit 問題。
+    """
     results = []
-    for code in ticker_list:
-        try:
-            stock = yf.Ticker(f"{code}.TW")
-            hist = stock.history(period="3mo")
-            if not hist.empty:
-                cp = hist['Close'].iloc[-1]
-                if not (min_price <= cp <= max_price): continue
+    
+    # 1. 準備批次代號清單
+    batch_tickers = [f"{code}.TW" for code in ticker_list]
+    
+    try:
+        # 2. 一次性下載所有資料 (極速)
+        # group_by='ticker' 讓資料結構變成 data['2330.TW']['Close']
+        data = yf.download(batch_tickers, period="3mo", group_by='ticker', threads=True, progress=False)
+        
+        # 3. 遍歷處理 (本地計算，不消耗 API)
+        for code in ticker_list:
+            yf_code = f"{code}.TW"
+            try:
+                # 處理單一股票資料 (從大表格中切出來)
+                if yf_code not in data.columns.levels[0]: 
+                    continue # 資料下載失敗或代號錯誤
+                
+                df = data[yf_code].dropna()
+                if df.empty or len(df) < 20: continue
 
-                ma20 = hist['Close'].rolling(20).mean().iloc[-1]
+                cp = df['Close'].iloc[-1]
+                
+                # --- 價格過濾 ---
+                if not (min_price <= cp <= max_price): continue 
+
+                # 計算指標
+                ma20 = df['Close'].rolling(20).mean().iloc[-1]
                 bias = ((cp - ma20) / ma20) * 100
-                pe = stock.info.get('trailingPE', 999)
-                pe = pe if pe else 999
-
-                entry = ma20
-                target = cp * 1.05
-                profit = int(investment * ((target - entry) / entry)) if entry > 0 else 0
-
+                
+                # --- PE 查詢策略 (兩階段過濾) ---
+                # 只有通過價格和乖離率篩選的，才去查 PE，大幅減少 API 呼叫
+                # 如果是價格模式，甚至不需要查 PE
+                pe = 999
                 should_add = False
+                
                 if mode == "price":
                     should_add = True
                 else:
-                    is_potential_list = (len(ticker_list) <= 10)
-                    if is_potential_list or ((pe <= max_pe or pe == 999) and bias >= min_bias):
-                        should_add = True
+                    # 排行榜模式：先初步判斷乖離率是否及格
+                    if bias >= min_bias or (len(ticker_list) <= 10): # 潛力股或符合乖離
+                         # 這裡才去 Call 個股 info，避免 100 支全查被鎖
+                        try:
+                            t = yf.Ticker(yf_code)
+                            pe = t.info.get('trailingPE', 999)
+                            pe = pe if pe else 999
+                        except: pe = 999
+                        
+                        if (pe <= max_pe or pe == 999):
+                            should_add = True
 
                 if should_add:
+                    entry = ma20
+                    target = cp * 1.05
+                    profit = int(investment * ((target - entry)/entry)) if entry > 0 else 0
+                    
                     name = twstock.codes[code].name if code in twstock.codes else code
                     results.append({
                         '代號': code, '名稱': name, '現價': round(cp, 2),
-                        '本益比': round(pe, 2) if pe != 999 else "N/A",
+                        '本益比': round(pe, 2) if pe != 999 else "N/A", 
                         '乖離率(%)': round(bias, 2), '預估獲利': f"${profit:,}"
                     })
-        except:
-            pass
-    return pd.DataFrame(results)
+            except: continue
 
+    except Exception as e:
+        st.error(f"掃描發生錯誤: {e}")
+        return pd.DataFrame()
+
+    return pd.DataFrame(results)
 
 # --- 5. 側邊欄控制台 ---
 
 with st.sidebar:
     st.header("🎮 戰情室控制台")
-
+    
     col_input, col_go = st.columns([2, 1])
     with col_input:
         direct_input = st.text_input("代號快搜", placeholder="如 2330", label_visibility="collapsed")
@@ -281,56 +290,65 @@ with st.sidebar:
                 st.session_state.selected_stock = direct_input.replace(".TW", "").strip()
                 st.rerun()
     st.markdown("---")
-
-    # 模式選擇 (移除獨立的歷史模式，改為內嵌)
+    
     page_mode = st.radio("📱 選擇功能模式", ["🏆 市場熱門排行", "🪙 價格區間快搜"])
-
+    
     if page_mode == "🏆 市場熱門排行":
         st.session_state.current_mode = "ranking"
         st.info("💡 篩選優質權值股與潛力黑馬")
         max_pe = st.number_input("本益比上限 (PE)", value=35)
         min_bias = st.number_input("乖離率下限 (%)", value=0.0)
         investment_amount = st.number_input("預估投入金額", value=100000, step=10000)
-
+        
         if st.button("🚀 啟動排行掃描"):
             st.session_state.selected_stock = None
-            st.session_state.scan_results = None
-            with st.status("正在分析市場熱點...", expanded=True):
-                st.write("🔍 掃描 Top 20...")
-                df_main = scan_tickers(MARKET_STOCKS, max_pe, min_bias, investment_amount, 0, 9999, mode="ranking")
-                if not df_main.empty:
-                    df_top20 = df_main.sort_values(by='乖離率(%)', ascending=False).head(20).reset_index(drop=True)
-                    df_top20.insert(0, '排名', range(1, 1 + len(df_top20)))
-                    st.session_state.scan_results = df_top20
-                    # 存入 ranking 歷史
-                    add_to_history("ranking", df_top20, f"Top 20 (PE<{max_pe})")
-                else:
-                    st.session_state.scan_results = pd.DataFrame()
+            st.session_state.scan_results = None 
+            
+            # 顯示進度條，提升 UX
+            progress_text = "正在批次下載市場數據 (極速版)..."
+            my_bar = st.progress(0, text=progress_text)
+            
+            # 執行優化後的掃描
+            df_main = scan_tickers_optimized(MARKET_STOCKS, max_pe, min_bias, investment_amount, 0, 9999, mode="ranking")
+            my_bar.progress(50, text="正在分析潛力股...")
+            
+            if not df_main.empty:
+                df_top20 = df_main.sort_values(by='乖離率(%)', ascending=False).head(20).reset_index(drop=True)
+                df_top20.insert(0, '排名', range(1, 1 + len(df_top20)))
+                st.session_state.scan_results = df_top20
+                add_to_history("ranking", df_top20, f"Top 20 (PE<{max_pe})")
+            else: st.session_state.scan_results = pd.DataFrame()
 
-                st.write("💎 分析潛力股...")
-                st.session_state.scan_results_potential = scan_tickers(POTENTIAL_STOCKS, 9999, -9999, investment_amount,
-                                                                       0, 9999, mode="ranking")
+            st.session_state.scan_results_potential = scan_tickers_optimized(POTENTIAL_STOCKS, 9999, -9999, investment_amount, 0, 9999, mode="ranking")
+            
+            my_bar.progress(100, text="掃描完成！")
+            my_bar.empty() # 清除進度條
 
     else:
         st.session_state.current_mode = "price"
         st.info("💡 尋找特定價位的機會 (如銅板股)")
         c1, c2 = st.columns(2)
         min_p = c1.number_input("最低價", value=0)
-        max_p = c2.number_input("最高價", value=50)
+        max_p = c2.number_input("最高價", value=50) 
         investment_amount = st.number_input("預估投入金額 (本金)", value=50000, step=5000)
-
+        
         if st.button("🔎 搜尋價格區間"):
             st.session_state.selected_stock = None
             st.session_state.scan_results = None
-            with st.status(f"正在搜尋 {min_p}~{max_p} 元的股票...", expanded=True):
-                df_price = scan_tickers(MARKET_STOCKS, 9999, -9999, investment_amount, min_p, max_p, mode="price")
-                if not df_price.empty:
-                    df_price = df_price.sort_values(by='現價', ascending=True).reset_index(drop=True)
-                    st.session_state.scan_results = df_price
-                    # 存入 price 歷史
-                    add_to_history("price", df_price, f"股價 ${min_p}-${max_p}")
-                else:
-                    st.session_state.scan_results = pd.DataFrame()
+            
+            progress_text = f"正在搜尋 {min_p}~{max_p} 元的股票..."
+            my_bar = st.progress(0, text=progress_text)
+            
+            df_price = scan_tickers_optimized(MARKET_STOCKS, 9999, -9999, investment_amount, min_p, max_p, mode="price")
+            my_bar.progress(100, text="搜尋完成！")
+            my_bar.empty()
+            
+            if not df_price.empty:
+                df_price = df_price.sort_values(by='現價', ascending=True).reset_index(drop=True)
+                st.session_state.scan_results = df_price
+                add_to_history("price", df_price, f"股價 ${min_p}-${max_p}")
+            else:
+                st.session_state.scan_results = pd.DataFrame()
 
 # === 主畫面路由 ===
 if st.session_state.selected_stock:
@@ -342,12 +360,12 @@ if st.session_state.selected_stock:
 
     with st.spinner(f"正在進行 {code} 全方位戰略分析..."):
         data = get_stock_detail(code)
-
+    
     if data:
         pa = data['analysis']
         info = data['info']
         st.markdown(f"# {data['name']} ({code}) 戰略分析報告")
-
+        
         tab1, tab2, tab3 = st.tabs(["📊 戰略總覽", "📈 技術指標詳解", "💰 獲利與產業"])
 
         with tab1:
@@ -369,8 +387,7 @@ if st.session_state.selected_stock:
                     st.write(f"🔵 **建議進場:** `{pa['entry_price']:.2f}`")
                     st.write(f"🔴 **獲利目標:** `{pa['take_profit']:.2f}`")
                     st.write(f"⚪️ **防守止損:** `{pa['stop_loss']:.2f}`")
-                else:
-                    st.warning("⛔️ 目前趨勢不佳，建議觀望。")
+                else: st.warning("⛔️ 目前趨勢不佳，建議觀望。")
             st.plotly_chart(plot_full_analysis(data['history'], data['name'], pa), use_container_width=True)
 
         with tab2:
@@ -379,124 +396,90 @@ if st.session_state.selected_stock:
             with t1:
                 st.markdown("#### KD 隨機指標")
                 st.write(f"**目前 K 值: {pa['k']:.1f} / D 值: {pa['d']:.1f}**")
-                if pa['k'] > 80:
-                    st.warning("🔥 **超買區**：過熱警戒。")
-                elif pa['k'] < 20:
-                    st.success("🧊 **超賣區**：低檔鈍化，關注反彈。")
-                elif pa['k'] > pa['d']:
-                    st.info("📈 **黃金交叉**：短線偏多。")
-                else:
-                    st.error("📉 **死亡交叉**：短線偏空。")
+                if pa['k'] > 80: st.warning("🔥 **超買區**：過熱警戒。")
+                elif pa['k'] < 20: st.success("🧊 **超賣區**：低檔鈍化，關注反彈。")
+                elif pa['k'] > pa['d']: st.info("📈 **黃金交叉**：短線偏多。")
+                else: st.error("📉 **死亡交叉**：短線偏空。")
             with t2:
                 st.markdown("#### MACD 趨勢指標")
                 st.write(f"**MACD 柱狀體: {pa['macd_hist']:.2f}**")
-                if pa['macd_hist'] > 0:
-                    st.success("🚀 **多頭趨勢**：柱狀翻紅。")
-                else:
-                    st.error("🐻 **空頭抵抗**：柱狀翻綠。")
+                if pa['macd_hist'] > 0: st.success("🚀 **多頭趨勢**：柱狀翻紅。")
+                else: st.error("🐻 **空頭抵抗**：柱狀翻綠。")
 
         with tab3:
             st.subheader("💰 獲利預估與產業背景")
             if pa['entry_price'] > 0:
                 roi = (pa['take_profit'] - pa['entry_price']) / pa['entry_price']
                 est_profit = int(investment_amount * roi)
-                st.metric("預估獲利", f"${est_profit:,}", f"報酬率 {roi * 100:.1f}%")
-            else:
-                st.write("無進場建議，無法計算。")
+                st.metric("預估獲利", f"${est_profit:,}", f"報酬率 {roi*100:.1f}%")
+            else: st.write("無進場建議，無法計算。")
             st.markdown("---")
             sector_zh = translate_sector(info.get('sector', 'Unknown'))
             st.info(f"**產業**: {sector_zh} | **細分**: {info.get('industry', 'Unknown')}")
             st.write(f"**公司簡介**: {data['zh_summary']}")
 
 else:
-    # --- 主畫面：根據模式顯示不同的內容與歷史 ---
-
     if st.session_state.current_mode == "ranking":
         st.title("🏆 台股熱門排行模式")
-
-        # 使用 Tabs 分開「最新結果」與「歷史紀錄」
         tab_now, tab_hist = st.tabs(["🚀 最新掃描結果", "📜 排行榜歷史回顧"])
-
         with tab_now:
             if st.session_state.scan_results is not None:
                 st.subheader("Top 20 熱門排行")
                 st.caption("💡 依據乖離率排序")
                 if not st.session_state.scan_results.empty:
-                    event1 = st.dataframe(st.session_state.scan_results, on_select="rerun", selection_mode="single-row",
-                                          use_container_width=True, hide_index=True)
+                    event1 = st.dataframe(st.session_state.scan_results, on_select="rerun", selection_mode="single-row", use_container_width=True, hide_index=True)
                     if len(event1.selection.rows) > 0:
-                        st.session_state.selected_stock = st.session_state.scan_results.iloc[event1.selection.rows[0]][
-                            '代號']
+                        st.session_state.selected_stock = st.session_state.scan_results.iloc[event1.selection.rows[0]]['代號']
                         st.rerun()
-                else:
-                    st.warning("無符合條件股票。")
-
+                else: st.warning("無符合條件股票。")
                 st.markdown("---")
                 st.subheader("🚀 潛力黑馬股")
                 if st.session_state.scan_results_potential is not None:
-                    event2 = st.dataframe(st.session_state.scan_results_potential, on_select="rerun",
-                                          selection_mode="single-row", use_container_width=True, hide_index=True)
+                    event2 = st.dataframe(st.session_state.scan_results_potential, on_select="rerun", selection_mode="single-row", use_container_width=True, hide_index=True)
                     if len(event2.selection.rows) > 0:
-                        st.session_state.selected_stock = \
-                        st.session_state.scan_results_potential.iloc[event2.selection.rows[0]]['代號']
+                        st.session_state.selected_stock = st.session_state.scan_results_potential.iloc[event2.selection.rows[0]]['代號']
                         st.rerun()
             else:
                 st.info("👈 請在左側設定參數並按下 **「啟動排行掃描」**")
-
         with tab_hist:
-            # 篩選出 ranking 的歷史
             ranking_hist = [h for h in st.session_state.scan_history if h['mode'] == 'ranking']
-            if not ranking_hist:
-                st.write("尚無排行模式的歷史紀錄。")
+            if not ranking_hist: st.write("尚無排行模式的歷史紀錄。")
             else:
                 hist_options = [h['display_name'] for h in ranking_hist]
                 selected_hist_name = st.selectbox("選擇存檔點", hist_options, key="rank_hist_select")
-
-                # 找到對應的資料
                 selected_data = next((h['data'] for h in ranking_hist if h['display_name'] == selected_hist_name), None)
                 if selected_data is not None:
                     st.subheader(f"📂 {selected_hist_name}")
-                    event_h1 = st.dataframe(selected_data, on_select="rerun", selection_mode="single-row",
-                                            use_container_width=True, hide_index=True, key="rank_hist_table")
+                    event_h1 = st.dataframe(selected_data, on_select="rerun", selection_mode="single-row", use_container_width=True, hide_index=True, key="rank_hist_table")
                     if len(event_h1.selection.rows) > 0:
                         st.session_state.selected_stock = selected_data.iloc[event_h1.selection.rows[0]]['代號']
                         st.rerun()
 
     elif st.session_state.current_mode == "price":
         st.title("🪙 價格區間獵人模式")
-
         tab_now, tab_hist = st.tabs(["🔎 最新搜尋結果", "📜 價格搜尋歷史"])
-
         with tab_now:
             if st.session_state.scan_results is not None:
                 st.subheader("搜尋結果")
                 st.caption("💡 依據股價排序")
                 if not st.session_state.scan_results.empty:
-                    event3 = st.dataframe(st.session_state.scan_results, on_select="rerun", selection_mode="single-row",
-                                          use_container_width=True, hide_index=True)
+                    event3 = st.dataframe(st.session_state.scan_results, on_select="rerun", selection_mode="single-row", use_container_width=True, hide_index=True)
                     if len(event3.selection.rows) > 0:
-                        st.session_state.selected_stock = st.session_state.scan_results.iloc[event3.selection.rows[0]][
-                            '代號']
+                        st.session_state.selected_stock = st.session_state.scan_results.iloc[event3.selection.rows[0]]['代號']
                         st.rerun()
-                else:
-                    st.warning(f"在該價格區間內找不到熱門股。")
+                else: st.warning(f"在該價格區間內找不到熱門股。")
             else:
                 st.info("👈 請在左側設定價格範圍並按下 **「搜尋價格區間」**")
-
         with tab_hist:
-            # 篩選出 price 的歷史
             price_hist = [h for h in st.session_state.scan_history if h['mode'] == 'price']
-            if not price_hist:
-                st.write("尚無價格模式的歷史紀錄。")
+            if not price_hist: st.write("尚無價格模式的歷史紀錄。")
             else:
                 hist_options = [h['display_name'] for h in price_hist]
                 selected_hist_name = st.selectbox("選擇存檔點", hist_options, key="price_hist_select")
-
                 selected_data = next((h['data'] for h in price_hist if h['display_name'] == selected_hist_name), None)
                 if selected_data is not None:
                     st.subheader(f"📂 {selected_hist_name}")
-                    event_h2 = st.dataframe(selected_data, on_select="rerun", selection_mode="single-row",
-                                            use_container_width=True, hide_index=True, key="price_hist_table")
+                    event_h2 = st.dataframe(selected_data, on_select="rerun", selection_mode="single-row", use_container_width=True, hide_index=True, key="price_hist_table")
                     if len(event_h2.selection.rows) > 0:
                         st.session_state.selected_stock = selected_data.iloc[event_h2.selection.rows[0]]['代號']
                         st.rerun()
