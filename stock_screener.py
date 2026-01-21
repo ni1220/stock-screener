@@ -245,6 +245,28 @@ def plot_backtest(df, bt_result):
     fig.update_yaxes(title_text="股價", secondary_y=True)
     return fig
 
+# --- 修復：補回 plot_full_analysis 函式 ---
+def plot_full_analysis(df, name, analysis):
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
+                        row_heights=[0.6, 0.2, 0.2],
+                        subplot_titles=(f"{name} 價量分析", "KD", "MACD"))
+    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
+                    low=df['Low'], close=df['Close'], name='K線'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(20).mean(), line=dict(color='orange', width=1), name='月線'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].rolling(60).mean(), line=dict(color='green', width=1), name='季線'), row=1, col=1)
+    
+    fig.add_trace(go.Scatter(x=df.index, y=df['K'], line=dict(color='blue', width=1), name='K'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['D'], line=dict(color='orange', width=1), name='D'), row=2, col=1)
+    fig.add_hline(y=80, line_dash="dot", line_color="gray", row=2, col=1)
+    fig.add_hline(y=20, line_dash="dot", line_color="gray", row=2, col=1)
+    
+    colors = ['red' if v < 0 else 'green' for v in df['MACD_Hist']]
+    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], marker_color=colors, name='MACD'), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['DIF'], line=dict(color='black', width=1), name='DIF'), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['DEA'], line=dict(color='orange', width=1), name='DEA'), row=3, col=1)
+    fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False)
+    return fig
+
 @st.cache_data(ttl=3600)
 def get_stock_detail(code):
     try:
